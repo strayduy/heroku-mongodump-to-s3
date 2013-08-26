@@ -62,16 +62,18 @@ def main():
                      password=args.db_password)
         logger.info('Dumped Mongo database to local filesystem!')
 
-        logger.info('Gzipping Mongo dump...')
-        gzipped_mongodump = gzip_mongodump(mongodump_dir)
-        logger.info('Gzipped Mongo dump!')
-
-        logger.info('Uploading Mongo dump to S3...')
-        upload_mongodump_to_s3(gzipped_mongodump,
-                               s3_conn,
-                               args.s3_bucket_name,
-                               args.backup_prefix)
-        logger.info('Uploaded Mongo dump to S3!')
+        # Create a separate temp directory to store the gzipped mongodump
+        with tempdir.TempDir() as gzip_dir:
+            logger.info('Gzipping Mongo dump...')
+            gzipped_mongodump = gzip_mongodump(mongodump_dir, gzip_dir)
+            logger.info('Gzipped Mongo dump!')
+    
+            logger.info('Uploading Mongo dump to S3...')
+            upload_mongodump_to_s3(gzipped_mongodump,
+                                   s3_conn,
+                                   args.s3_bucket_name,
+                                   args.backup_prefix)
+            logger.info('Uploaded Mongo dump to S3!')
 
     logger.info('Finished backing up Mongo database to S3!')
 
@@ -107,12 +109,12 @@ def do_mongodump(dump_dir,
     if envoy_response.status_code != 0:
         raise Exception(envoy_response.std_err)
 
-def gzip_mongodump(dump_dir):
+def gzip_mongodump(dump_dir, gzip_dir):
     now = datetime.datetime.utcnow()
 
     # Construct file path to the gzipped mongodump
     backup_filename = now.strftime('%Y-%m-%d_%H-%M-%S.gz')
-    backup_filepath = os.path.join(dump_dir, backup_filename)
+    backup_filepath = os.path.join(gzip_dir, backup_filename)
 
     cmd = 'tar -zcvf %(backup_filepath)s %(dump_dir)s' % {
           'backup_filepath' : backup_filepath,
