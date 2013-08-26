@@ -1,3 +1,4 @@
+boto==2.10.0
 envoy==0.0.2
 tempdir==0.6
 wsgiref==0.1.2
