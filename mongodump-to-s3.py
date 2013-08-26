@@ -61,7 +61,6 @@ def main():
                      username=args.db_username,
                      password=args.db_password)
         logger.info('Dumped Mongo database to local filesystem!')
-        return 0
 
         logger.info('Gzipping Mongo dump...')
         gzipped_mongodump = gzip_mongodump(mongodump_dir)
@@ -102,8 +101,6 @@ def do_mongodump(dump_dir,
                'username' : username,
                'password' : password}
 
-    logger.debug(envoy.expand_args(cmd))
-    return
     envoy_response = envoy.run(cmd)
 
     # Check status code to verify that the command succeeded
