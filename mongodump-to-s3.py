@@ -97,8 +97,9 @@ def do_mongodump(dump_dir,
     logger.debug('(Omitted username and password for security)')
 
     if username and password:
-        cmd += '--username %(username)s --password %(password)s' % (
-               username, password)
+        cmd += '--username %(username)s --password %(password)s' % {
+               'username' : username,
+               'password' : password}
 
     envoy_response = envoy.run(cmd)
 
