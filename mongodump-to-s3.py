@@ -2,6 +2,7 @@
 
 # Standard libs
 import argparse
+import collections
 import datetime
 import logging
 import os
@@ -11,6 +12,9 @@ import sys
 import boto
 import envoy
 import tempdir
+
+# Constants
+BACKUP_FILENAME_FORMAT = '%Y-%m-%d_%H-%M-%S.gz'
 
 # Logging
 logger = logging.getLogger('mongodump-to-s3')
@@ -40,6 +44,7 @@ def main():
     parser.add_argument('--db-username', default='')
     parser.add_argument('--db-password', default='')
     parser.add_argument('--backup-prefix', default='')
+    parser.add_argument('--max-backups', type=int, default=0)
     args = parser.parse_args()
     
     logger.info('Backing up Mongo database to S3...')
@@ -74,6 +79,17 @@ def main():
                                    args.s3_bucket_name,
                                    args.backup_prefix)
             logger.info('Uploaded Mongo dump to S3!')
+
+            # Removing old backups
+            if args.max_backups > 0:
+                logger.info('Removing old backups, '
+                            'keeping only the latest %d...' % (
+                                args.max_backups))
+                removed_backups = remove_old_backups(s3_conn,
+                                                     args.s3_bucket_name,
+                                                     args.max_backups,
+                                                     args.backup_prefix)
+                logger.info('Removed %d old backups!' % (len(removed_backups)))
 
     logger.info('Finished backing up Mongo database to S3!')
 
@@ -113,7 +129,7 @@ def gzip_mongodump(dump_dir, gzip_dir):
     now = datetime.datetime.utcnow()
 
     # Construct file path to the gzipped mongodump
-    backup_filename = now.strftime('%Y-%m-%d_%H-%M-%S.gz')
+    backup_filename = now.strftime(BACKUP_FILENAME_FORMAT)
     backup_filepath = os.path.join(gzip_dir, backup_filename)
 
     cmd = 'tar -zcvf %(backup_filepath)s %(dump_dir)s' % {
@@ -154,6 +170,39 @@ def s3_upload_progress(so_far, total):
     percent = '%.1f%%' % (float(so_far)/total*100)
     logger.debug('%s/%s bytes transferred (%s)' % (
                  so_far_formatted, total_formatted, percent))
+
+def remove_old_backups(s3_conn, bucket_name, max_backups, backup_prefix=''):
+    removed_backups = []
+
+    bucket = s3_conn.get_bucket(bucket_name)
+
+    if backup_prefix:
+        filename_format = '%s/%s' % (backup_prefix, BACKUP_FILENAME_FORMAT)
+    else:
+        filename_format = BACKUP_FILENAME_FORMAT
+
+    Backup = collections.namedtuple('Backup', ['key', 'date'])
+
+    # Aggregate a list of all the stored backups
+    all_backups = []
+    for key in bucket.list(prefix=backup_prefix):
+        try:
+            backup_date = datetime.datetime.strptime(key.key, filename_format)
+        except ValueError:
+            pass
+        else:
+            backup = Backup(key.key, backup_date)
+            all_backups.append(backup)
+
+    # Sort backups in reverse chronological order
+    all_backups.sort(key=lambda x: x.date, reverse=True)
+
+    # Keep the N most recent backups and remove the rest
+    removed_backups = all_backups[max_backups:]
+    for backup in removed_backups:
+        bucket.delete_key(backup.key)
+
+    return removed_backups
 
 if __name__ == '__main__':
     sys.exit(main())
