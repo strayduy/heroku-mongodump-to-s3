@@ -6,11 +6,13 @@ import collections
 import datetime
 import logging
 import os
+import random
 import sys
 
 # Third party libs
 import boto
 import envoy
+import pymongo
 import tempdir
 
 # Constants
@@ -39,14 +41,49 @@ def main():
                              'the dump in S3')
     parser.add_argument('db_name')
     parser.add_argument('s3_bucket_name')
-    parser.add_argument('--db-host', default='localhost')
-    parser.add_argument('--db-port', type=int, default=27017)
+    parser.add_argument('--db-host', default='localhost:27017')
+    parser.add_argument('--db-replica-set', default='')
     parser.add_argument('--db-username', default='')
     parser.add_argument('--db-password', default='')
     parser.add_argument('--backup-prefix', default='')
     parser.add_argument('--max-backups', type=int, default=0)
+    parser.add_argument('--require-secondary-read', action='store_true')
     args = parser.parse_args()
     
+    # If we're requiring a read from a secondary within a replica set, identify
+    # the hostnames for the secondary nodes
+    if args.require_secondary_read:
+        logger.info('Requiring that we read from a secondary')
+
+        logger.info('Connecting to replica set: %s/%s' % (args.db_replica_set,
+                                                          args.db_host))
+        try:
+            mongo_client = pymongo.MongoReplicaSetClient(args.db_host,
+                                                         replicaSet=args.db_replica_set)
+            logger.info('Connected to replica set!')
+        except Exception as e:
+            mongo_client = None
+            logger.error('Failed to connect to replica set: %s' % (str(e)))
+            logger.error('Exiting...')
+            return 1
+
+        secondary_nodes = mongo_client.secondaries
+
+        if not secondary_nodes:
+            logger.error('Replica set doesn\'t have any secondaries')
+            logger.error('Exiting...')
+            return 1
+
+        # The nodes are tuples of (hostname, port)
+        # Join them into strings of hostname:port
+        secondary_hostnames = [':'.join([str(i) for i in s])
+                               for s in secondary_nodes]
+        db_host = random.choice(secondary_hostnames)
+    else:
+        # If we're not reading from a secondary, we'll read from the given
+        # hostname
+        db_host = args.db_host
+
     logger.info('Backing up Mongo database to S3...')
 
     # Connect to S3
@@ -61,8 +98,7 @@ def main():
         logger.info('Dumping Mongo database to local filesystem...')
         do_mongodump(mongodump_dir,
                      args.db_name,
-                     host=args.db_host,
-                     port=args.db_port,
+                     host=db_host,
                      username=args.db_username,
                      password=args.db_password)
         logger.info('Dumped Mongo database to local filesystem!')
@@ -98,16 +134,13 @@ def main():
 def do_mongodump(dump_dir,
                  db,
                  host='localhost',
-                 port=27017,
                  username='',
                  password=''):
     cmd = 'mongodump ' \
           '--host %(host)s ' \
-          '--port %(port)d ' \
           '--db %(db)s ' \
           '--out %(dump_dir)s ' % {
           'host'     : host,
-          'port'     : port,
           'db'       : db,
           'dump_dir' : dump_dir}
 
