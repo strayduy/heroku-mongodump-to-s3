@@ -49,7 +49,7 @@ def main():
     parser.add_argument('--max-backups', type=int, default=0)
     parser.add_argument('--require-secondary-read', action='store_true')
     args = parser.parse_args()
-    
+
     # If we're requiring a read from a secondary within a replica set, identify
     # the hostnames for the secondary nodes
     if args.require_secondary_read:
@@ -108,7 +108,7 @@ def main():
             logger.info('Gzipping Mongo dump...')
             gzipped_mongodump = gzip_mongodump(mongodump_dir, gzip_dir)
             logger.info('Gzipped Mongo dump!')
-    
+
             logger.info('Uploading Mongo dump to S3...')
             upload_mongodump_to_s3(gzipped_mongodump,
                                    s3_conn,
@@ -239,3 +239,4 @@ def remove_old_backups(s3_conn, bucket_name, max_backups, backup_prefix=''):
 
 if __name__ == '__main__':
     sys.exit(main())
+
