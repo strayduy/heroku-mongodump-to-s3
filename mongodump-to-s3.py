@@ -24,6 +24,12 @@ logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.DEBUG)
 
 def main():
+    # Retrieve database credentials from environment variables
+    db_host = os.getenv('DB_HOST')
+    db_name = os.getenv('DB_NAME')
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+
     # Retrieve AWS credentials from environment variables
     access_key_id     = os.getenv('AWS_ACCESS_KEY_ID')
     secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
@@ -39,12 +45,7 @@ def main():
     parser = argparse.ArgumentParser(
                  description='Backup mongo database via mongodump and store '
                              'the dump in S3')
-    parser.add_argument('db_name')
     parser.add_argument('s3_bucket_name')
-    parser.add_argument('--db-host', default='localhost:27017')
-    parser.add_argument('--db-replica-set', default='')
-    parser.add_argument('--db-username', default='')
-    parser.add_argument('--db-password', default='')
     parser.add_argument('--backup-prefix', default='')
     parser.add_argument('--max-backups', type=int, default=0)
     parser.add_argument('--require-secondary-read', action='store_true')
@@ -97,10 +98,10 @@ def main():
     with tempdir.TempDir() as mongodump_dir:
         logger.info('Dumping Mongo database to local filesystem...')
         do_mongodump(mongodump_dir,
-                     args.db_name,
+                     db_name,
                      host=db_host,
-                     username=args.db_username,
-                     password=args.db_password)
+                     username=db_user,
+                     password=db_password)
         logger.info('Dumped Mongo database to local filesystem!')
 
         # Create a separate temp directory to store the gzipped mongodump
@@ -144,8 +145,7 @@ def do_mongodump(dump_dir,
           'db'       : db,
           'dump_dir' : dump_dir}
 
-    logger.debug('Executing: %s' % (cmd))
-    logger.debug('(Omitted username and password for security)')
+    logger.debug('Executing mongodump')
 
     if username and password:
         cmd += '--username %(username)s --password %(password)s' % {
