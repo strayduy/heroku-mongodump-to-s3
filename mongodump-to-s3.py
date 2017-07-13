@@ -12,7 +12,6 @@ import sys
 # Third party libs
 import boto
 import envoy
-import pymongo
 import tempdir
 
 # Constants
@@ -49,41 +48,8 @@ def main():
     parser.add_argument('--backup-prefix', default='')
     parser.add_argument('--max-backups', type=int, default=0)
     parser.add_argument('--require-secondary-read', action='store_true')
+    parser.add_argument('--ssl', action='store_true')
     args = parser.parse_args()
-
-    # If we're requiring a read from a secondary within a replica set, identify
-    # the hostnames for the secondary nodes
-    if args.require_secondary_read:
-        logger.info('Requiring that we read from a secondary')
-
-        logger.info('Connecting to replica set: %s/%s' % (args.db_replica_set,
-                                                          args.db_host))
-        try:
-            mongo_client = pymongo.MongoReplicaSetClient(args.db_host,
-                                                         replicaSet=args.db_replica_set)
-            logger.info('Connected to replica set!')
-        except Exception as e:
-            mongo_client = None
-            logger.error('Failed to connect to replica set: %s' % (str(e)))
-            logger.error('Exiting...')
-            return 1
-
-        secondary_nodes = mongo_client.secondaries
-
-        if not secondary_nodes:
-            logger.error('Replica set doesn\'t have any secondaries')
-            logger.error('Exiting...')
-            return 1
-
-        # The nodes are tuples of (hostname, port)
-        # Join them into strings of hostname:port
-        secondary_hostnames = [':'.join([str(i) for i in s])
-                               for s in secondary_nodes]
-        db_host = random.choice(secondary_hostnames)
-    else:
-        # If we're not reading from a secondary, we'll read from the given
-        # hostname
-        db_host = args.db_host
 
     logger.info('Backing up Mongo database to S3...')
 
@@ -101,7 +67,9 @@ def main():
                      db_name,
                      host=db_host,
                      username=db_user,
-                     password=db_password)
+                     password=db_password,
+                     require_secondary_read=args.require_secondary_read,
+                     use_ssl=args.ssl)
         logger.info('Dumped Mongo database to local filesystem!')
 
         # Create a separate temp directory to store the gzipped mongodump
@@ -136,7 +104,9 @@ def do_mongodump(dump_dir,
                  db,
                  host='localhost',
                  username='',
-                 password=''):
+                 password='',
+                 require_secondary_read=False,
+                 use_ssl=False):
     cmd = 'mongodump ' \
           '--host %(host)s ' \
           '--db %(db)s ' \
@@ -148,9 +118,15 @@ def do_mongodump(dump_dir,
     logger.debug('Executing mongodump')
 
     if username and password:
-        cmd += '--username %(username)s --password %(password)s' % {
+        cmd += '--username %(username)s --password %(password)s ' % {
                'username' : username,
                'password' : password}
+
+    if require_secondary_read:
+        cmd += '--readPreference=secondary '
+
+    if use_ssl:
+        cmd += '--ssl --sslAllowInvalidCertificates '
 
     envoy_response = envoy.run(cmd)
 
